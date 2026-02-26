@@ -17,35 +17,35 @@ type Store[K comparable, V any] interface {
 	SetTTL(K, time.Duration) error
 }
 
-type Entry[V any] struct {
+type entry[V any] struct {
 	value     V
 	expiresAt time.Time
 	hasTTL    bool
 }
 
-func (e Entry[V]) isExpired() bool {
+func (e entry[V]) isExpired() bool {
 	return e.hasTTL && time.Now().After(e.expiresAt)
 }
 
 type KVStore[K comparable, V any] struct {
-	data map[K]Entry[V]
+	data map[K]entry[V]
 	mu   sync.RWMutex
 }
 
 // Constructor
 func InitKVStore[K comparable, V any]() KVStore[K, V] {
 	return KVStore[K, V]{
-		data: make(map[K]Entry[V]),
+		data: make(map[K]entry[V]),
 	}
 }
 
-// Checks if given key exists
+// Checks if a given key exists and has not expired
 func (s *KVStore[K, V]) Exists(key K) bool {
-	entry, exists := s.data[key]
+	e, exists := s.data[key]
 	if !exists {
 		return false
 	}
-	if entry.isExpired() {
+	if e.isExpired() {
 		return false
 	}
 	return true
@@ -58,10 +58,12 @@ func (s *KVStore[K, V]) Put(key K, value V) error {
 	if s.Exists(key) {
 		return fmt.Errorf("ERROR: The Key (%v) already exists!", key)
 	}
-	s.data[key] = Entry[V]{value: value}
+	s.data[key] = entry[V]{value: value}
 	return nil
 }
 
+// PutWithTTL inserts a key-value pair that will expire after the given duration.
+// If the key already exists and has not expired, it returns an error.
 func (s *KVStore[K, V]) PutWithTTL(key K, value V, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -69,7 +71,11 @@ func (s *KVStore[K, V]) PutWithTTL(key K, value V, ttl time.Duration) error {
 	if s.Exists(key) {
 		return fmt.Errorf("ERROR: The Key (%v) already exists!", key)
 	}
-	s.data[key] = Entry[V]{value: value, expiresAt: time.Now().Add(ttl), hasTTL: true}
+	s.data[key] = entry[V]{
+		value:     value,
+		expiresAt: time.Now().Add(ttl),
+		hasTTL:    true,
+	}
 	return nil
 }
 
@@ -77,15 +83,16 @@ func (s *KVStore[K, V]) Get(key K) (V, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	entry, exists := s.data[key]
-	if !exists || entry.isExpired() {
+	e, exists := s.data[key]
+	if !exists || e.isExpired() {
 		var zero V
 		return zero, fmt.Errorf("ERROR: The Key (%v) does not exist!", key)
 	}
 
-	return entry.value, nil
+	return e.value, nil
 }
 
+// Update replaces the value for an existing key while preserving its TTL.
 func (s *KVStore[K, V]) Update(key K, value V) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -97,7 +104,6 @@ func (s *KVStore[K, V]) Update(key K, value V) error {
 	e := s.data[key]
 	e.value = value
 	s.data[key] = e
-
 	return nil
 }
 
@@ -113,6 +119,7 @@ func (s *KVStore[K, V]) Delete(key K) error {
 	return nil
 }
 
+// SetTTL sets or updates the TTL on an existing, non-expired key.
 func (s *KVStore[K, V]) SetTTL(key K, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -128,7 +135,9 @@ func (s *KVStore[K, V]) SetTTL(key K, ttl time.Duration) error {
 	return nil
 }
 
-func (s *KVStore[K, V]) Cleanup(interval time.Duration) {
+// StartCleanup launches a background goroutine that periodically removes
+// expired keys from the store at the given interval.
+func (s *KVStore[K, V]) StartCleanup(interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -161,7 +170,7 @@ func NewServer(listenAddr string) *Server {
 // Starts the HTTP server
 func (s *Server) Start() {
 	fmt.Printf("HTTP server is running on port %s", s.ListenAddr)
-	s.Store.Cleanup(time.Minute)
+	s.Store.StartCleanup(time.Minute)
 
 	e := echo.New()
 
