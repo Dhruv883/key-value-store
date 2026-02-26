@@ -8,6 +8,12 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+type GetResponse struct {
+	Value               string  `json:"value"`
+	HasTTL              bool    `json:"has_ttl"`
+	TTLRemainingSeconds float64 `json:"ttl_remaining_seconds,omitempty"`
+}
+
 func (s *Server) HandlePut(c *echo.Context) error {
 	key := c.Param("key")
 	value := c.Param("value")
@@ -39,7 +45,38 @@ func (s *Server) HandleGet(c *echo.Context) error {
 		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{key: value})
+	remaining, hasTTL, _ := s.Store.TTLRemaining(key)
+	resp := GetResponse{
+		Value:  value,
+		HasTTL: hasTTL,
+	}
+	if hasTTL {
+		resp.TTLRemainingSeconds = remaining.Seconds()
+	}
+
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (s *Server) HandleGetTTL(c *echo.Context) error {
+	key := c.Param("key")
+
+	remaining, hasTTL, err := s.Store.TTLRemaining(key)
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]string{"error": err.Error()})
+	}
+
+	if !hasTTL {
+		return c.JSON(http.StatusOK, map[string]any{
+			"key":     key,
+			"has_ttl": false,
+		})
+	}
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"key":                   key,
+		"has_ttl":               true,
+		"ttl_remaining_seconds": remaining.Seconds(),
+	})
 }
 
 func (s *Server) HandleUpdate(c *echo.Context) error {

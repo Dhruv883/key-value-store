@@ -15,6 +15,7 @@ type Store[K comparable, V any] interface {
 	Update(K, V) error
 	Delete(K) error
 	SetTTL(K, time.Duration) error
+	TTLRemaining(K) (time.Duration, bool, error)
 }
 
 type Entry[V any] struct {
@@ -113,6 +114,23 @@ func (s *KVStore[K, V]) Delete(key K) error {
 	return nil
 }
 
+// Returns the remaining TTL for a key, a bool indicating whether the key has a TTL, and any error.
+func (s *KVStore[K, V]) TTLRemaining(key K) (time.Duration, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	entry, exists := s.data[key]
+	if !exists || entry.isExpired() {
+		return 0, false, fmt.Errorf("ERROR: The Key (%v) does not exist!", key)
+	}
+
+	if !entry.hasTTL {
+		return 0, false, nil
+	}
+
+	return time.Until(entry.expiresAt), true, nil
+}
+
 func (s *KVStore[K, V]) SetTTL(key K, ttl time.Duration) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -170,6 +188,7 @@ func (s *Server) Start() {
 	e.GET("/update/:key/:value", s.HandleUpdate)
 	e.GET("/delete/:key", s.HandleDelete)
 	e.GET("/ttl/:key/:seconds", s.HandleSetTTL)
+	e.GET("/ttl/:key", s.HandleGetTTL)
 
 	e.Start(s.ListenAddr)
 }
