@@ -5,6 +5,7 @@ A simple, thread-safe, in-memory key-value store implemented in Go. It exposes a
 *   Thread-safe in-memory key-value store
 *   Generic key-value store implementation using Go generics
 *   HTTP-based CRUD interface.
+*   TTL (Time-To-Live) support for keys
 
 ## Getting Started
 
